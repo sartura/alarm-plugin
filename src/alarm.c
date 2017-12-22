@@ -173,9 +173,20 @@ state_data_cb(const char *xpath, sr_val_t **values, size_t *values_cnt, void *pr
 {
     int rc = SR_ERR_OK;
 
-	/* snab does not recognize shelved-alarms */
-	if (0 == strncmp(xpath, "/ietf-alarms:alarms/shelved-alarms", strlen(xpath))) {
-		return rc;
+	#define ARR_SIZE(a) sizeof a / sizeof a[0]
+	/* remove duplicate calls */
+	char xpaths[4][XPATH_MAX_LEN] = {
+		"/ietf-alarms:alarms/alarm-list/alarm",
+		"/ietf-alarms:alarms/shelved-alarms",
+		"/ietf-alarms:alarms/alarm-inventory/alarm-type",
+		"/ietf-alarms:alarms/summary/alarm-summary"
+	};
+
+    const int xpaths_size = ARR_SIZE(xpaths);
+    for (int i = 0; i < xpaths_size; i++) {
+		if (0 == strncmp(xpath, xpaths[i], strlen(xpaths[i]))) {
+			return rc;
+		}
 	}
 
 	ctx_t *ctx = private_ctx;
