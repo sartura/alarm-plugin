@@ -1,7 +1,7 @@
 /**
- * @file alarm.h
+ * @file xpath.h
  * @author Mislav Novakovic <mislav.novakovic@sartur.hr>
- * @brief header file for alarm.c.
+ * @brief header file for xpath.c.
  *
  * @copyright
  * Copyright (C) 2017 Deutsche Telekom AG.
@@ -19,7 +19,11 @@
  * limitations under the License.
  */
 
-#ifndef ALARM_H
-#define ALARM_H
+#ifndef PARSE_H
+#define PARSE_H
 
-#endif /* ALARM_H */
+#include "transform.h"
+
+int parse_yang_model(ctx_t *ctx);
+
+#endif /* PARSE_H */

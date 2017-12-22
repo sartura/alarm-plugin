@@ -34,62 +34,13 @@
 #include <sysrepo/plugins.h>
 
 #include "alarm.h"
+#include "transform.h"
+#include "parse.h"
 #include "common.h"
 
 #define BUFSIZE 256
 
 const char *YANG_MODEL = "ietf-alarms";
-
-void socket_close(ctx_t *ctx) {
-	if (-1 != ctx->socket_fd) {
-		close(ctx->socket_fd);
-	}
-}
-
-int socket_connect(ctx_t *ctx) {
-	struct sockaddr_un address;
-	int  rc;
-
-	INF("connect to snabb socket /run/snabb/%d/config-leader-socket", ctx->pid);
-
-	ctx->socket_fd = socket(PF_UNIX, SOCK_STREAM, 0);
-	if (ctx->socket_fd < 0) {
-		WRN("failed to create UNIX socket: %d", ctx->socket_fd);
-		goto error;
-	}
-
-	snprintf(ctx->socket_path, UNIX_PATH_MAX, "/run/snabb/%d/config-leader-socket", ctx->pid);
-
-	/* start with a clean address structure */
-	memset(&address, 0, sizeof(struct sockaddr_un));
-
-	address.sun_family = AF_UNIX;
-	snprintf(address.sun_path, UNIX_PATH_MAX, "/run/snabb/%d/config-leader-socket", ctx->pid);
-
-	rc = connect(ctx->socket_fd, (struct sockaddr *) &address, sizeof(struct sockaddr_un));
-	CHECK_RET_MSG(rc, error, "failed connection to snabb socket");
-
-	return SR_ERR_OK;
-error:
-	socket_close(ctx);
-	return SR_ERR_INTERNAL;
-}
-
-void
-clear_context(ctx_t *ctx) {
-	sr_unsubscribe(ctx->running_sess, ctx->sub);
-
-	socket_close(ctx);
-
-	ly_ctx_destroy(ctx->libyang_ctx, NULL);
-
-	/* startup datastore */
-	sr_session_stop(ctx->startup_sess);
-	sr_disconnect(ctx->startup_conn);
-
-	INF("%s plugin cleanup finished.", ctx->yang_model);
-	free(ctx);
-}
 
 static int
 apply_change(ctx_t *ctx, sr_change_oper_t op, sr_val_t *old_val, sr_val_t *new_val, sr_notif_event_t event) {
@@ -222,8 +173,13 @@ state_data_cb(const char *xpath, sr_val_t **values, size_t *values_cnt, void *pr
 {
     int rc = SR_ERR_OK;
 
+	/* snab does not recognize shelved-alarms */
+	if (0 == strncmp(xpath, "/ietf-alarms:alarms/shelved-alarms", strlen(xpath))) {
+		return rc;
+	}
+
 	ctx_t *ctx = private_ctx;
-	//rc = snabb_state_data_to_sysrepo(ctx, (char *) xpath, values, values_cnt);
+	rc = snabb_state_data_to_sysrepo(ctx, (char *) xpath, values, values_cnt);
 	CHECK_RET(rc, error, "failed to load state data: %s", sr_strerror(rc));
 
 error:
@@ -233,10 +189,6 @@ error:
 int
 sr_plugin_init_cb(sr_session_ctx_t *session, void **private_ctx) {
 	sr_subscription_ctx_t *subscription = NULL;
-	char xpath_inventory[XPATH_MAX_LEN] = {0};
-	char xpath_summary[XPATH_MAX_LEN] = {0};
-	char xpath_list[XPATH_MAX_LEN] = {0};
-	char xpath_shelved[XPATH_MAX_LEN] = {0};
 	int rc = SR_ERR_OK;
 	ctx_t *ctx = NULL;
 	int32_t pid = 0;
@@ -249,10 +201,7 @@ sr_plugin_init_cb(sr_session_ctx_t *session, void **private_ctx) {
 	ctx->running_sess = session;
 	ctx->socket_fd = -1;
 
-	snprintf(xpath_inventory, XPATH_MAX_LEN, "/%s:alarms/alarm-inventory", ctx->yang_model);
-	snprintf(xpath_summary, XPATH_MAX_LEN, "/%s:alarms/summary", ctx->yang_model);
-	snprintf(xpath_list, XPATH_MAX_LEN, "/%s:alarms/alarm-list", ctx->yang_model);
-	snprintf(xpath_shelved, XPATH_MAX_LEN, "/%s:alarms/shelved-alarms", ctx->yang_model);
+	char *op_xpath = "/ietf-alarms:alarms";
 
 	/* get snabb process ID */
 	rc = get_snabb_pid("%d", &pid);
@@ -269,32 +218,19 @@ sr_plugin_init_cb(sr_session_ctx_t *session, void **private_ctx) {
 	CHECK_RET(rc, error, "failed socket_connect: %s", sr_strerror(rc));
 
 	/* parse the yang model */
-	//INF("Parse yang model %s with libyang", ctx->yang_model);
-	//rc = parse_yang_model(ctx);
-	//CHECK_RET(rc, error, "failed to parse yang model with libyang: %s", sr_strerror(rc));
+	INF("Parse yang model %s with libyang", ctx->yang_model);
+	rc = parse_yang_model(ctx);
+	CHECK_RET(rc, error, "failed to parse yang model with libyang: %s", sr_strerror(rc));
 
 	/* load the startup datastore */
-	//INF_MSG("load sysrepo startup datastore");
-	//rc = load_startup_datastore(ctx);
-	//CHECK_RET(rc, error, "failed to load startup datastore: %s", sr_strerror(rc));
-
-	//INF_MSG("sync sysrepo and snabb data");
-	//rc = sync_datastores(ctx);
-	//CHECK_RET(rc, error, "failed to apply sysrepo startup data to snabb: %s", sr_strerror(rc));
+	INF_MSG("load sysrepo startup datastore");
+	rc = load_startup_datastore(ctx);
+	CHECK_RET(rc, error, "failed to load startup datastore: %s", sr_strerror(rc));
 
 	rc = sr_module_change_subscribe(session, ctx->yang_model, module_change_cb, ctx, 0, SR_SUBSCR_CTX_REUSE, &ctx->sub);
 	CHECK_RET(rc, error, "failed sr_module_change_subscribe: %s", sr_strerror(rc));
 
-	rc = sr_dp_get_items_subscribe(session, xpath_list, state_data_cb, ctx, SR_SUBSCR_CTX_REUSE, &ctx->sub);
-	CHECK_RET(rc, error, "failed sr_dp_get_items_subscribe: %s", sr_strerror(rc));
-
-	rc = sr_dp_get_items_subscribe(session, xpath_summary, state_data_cb, ctx, SR_SUBSCR_CTX_REUSE, &ctx->sub);
-	CHECK_RET(rc, error, "failed sr_dp_get_items_subscribe: %s", sr_strerror(rc));
-
-	rc = sr_dp_get_items_subscribe(session, xpath_shelved, state_data_cb, ctx, SR_SUBSCR_CTX_REUSE, &ctx->sub);
-	CHECK_RET(rc, error, "failed sr_dp_get_items_subscribe: %s", sr_strerror(rc));
-
-	rc = sr_dp_get_items_subscribe(session, xpath_inventory, state_data_cb, ctx, SR_SUBSCR_CTX_REUSE, &ctx->sub);
+	rc = sr_dp_get_items_subscribe(session, op_xpath, state_data_cb, ctx, SR_SUBSCR_CTX_REUSE, &ctx->sub);
 	CHECK_RET(rc, error, "failed sr_dp_get_items_subscribe: %s", sr_strerror(rc));
 
 	INF("%s plugin initialized successfully", ctx->yang_model);

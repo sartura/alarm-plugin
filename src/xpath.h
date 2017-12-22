@@ -1,7 +1,7 @@
 /**
- * @file alarm.h
+ * @file xpath.h
  * @author Mislav Novakovic <mislav.novakovic@sartur.hr>
- * @brief header file for alarm.c.
+ * @brief header file for xpath.c.
  *
  * @copyright
  * Copyright (C) 2017 Deutsche Telekom AG.
@@ -19,7 +19,15 @@
  * limitations under the License.
  */
 
-#ifndef ALARM_H
-#define ALARM_H
+#ifndef XPATH_H
+#define XPATH_H
 
-#endif /* ALARM_H */
+#include "transform.h"
+
+bool leaf_without_value(sr_type_t type);
+bool list_or_container(sr_type_t type);
+int format_xpath(action_t *action);
+int transform_data_to_array(ctx_t *ctx, char *xpath, char *data, struct lyd_node **node);
+int get_yang_type(ctx_t *ctx, action_t *action);
+
+#endif /* XPATH_H */

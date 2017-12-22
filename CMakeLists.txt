@@ -11,6 +11,9 @@ set(PLUGIN 0 CACHE BOOL "Build a plugin.")
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} "${CMAKE_SOURCE_DIR}/CMakeModules/")
 
 set(SOURCES
+	src/xpath.c
+	src/transform.c
+	src/parse.c
 	src/alarm.c)
 
 if (PLUGIN)
